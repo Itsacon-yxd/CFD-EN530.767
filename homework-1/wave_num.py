@@ -47,4 +47,11 @@ ax.legend()
 ax.grid()
 plt.title("Modified wavenumber curves for different schemes", fontsize=30)
 plt.savefig("wave_num.png", dpi=300)
-plt.close()  
+plt.close()
+
+stats = []
+for scheme_num in range(1, 5):
+    stats.append([wave_curve(m*delta_x, scheme_num) for m in m_ls])
+stats = jnp.array(stats)/delta_x
+jnp.set_printoptions(precision=4, suppress=True)
+print(stats)
