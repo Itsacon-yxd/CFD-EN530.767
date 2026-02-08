@@ -1,6 +1,4 @@
-from tkinter import font
 import jax.numpy as jnp
-from matplotlib import lines
 import matplotlib.pyplot as plt
 
 def wave_curve(x, scheme_num):
@@ -49,9 +47,50 @@ plt.title("Modified wavenumber curves for different schemes", fontsize=30)
 plt.savefig("wave_num.png", dpi=300)
 plt.close()
 
-stats = []
-for scheme_num in range(1, 5):
-    stats.append([wave_curve(m*delta_x, scheme_num) for m in m_ls])
-stats = jnp.array(stats)/delta_x
-jnp.set_printoptions(precision=4, suppress=True)
-print(stats)
+
+fig2, axes2 = plt.subplots(2, 2, figsize=(12, 10))
+axes2 = axes2.flatten()
+
+markers = ['o', 's', '^', 'd']
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+
+for idx, m in enumerate(m_ls):
+    ax = axes2[idx]
+    
+    errors = []
+    for scheme_num in [1, 2, 3, 4]:
+        re, im = wave_curve(m*delta_x, scheme_num)
+        
+        dissipation = im/delta_x
+        errors.append(dissipation)
+    # Line plot with markers
+    x_pos = [1, 2, 3, 4]
+    ax.plot(x_pos, errors, 'o-', markersize=12, linewidth=2.5, 
+                color=colors[idx], markerfacecolor='white', 
+                markeredgecolor=colors[idx], markeredgewidth=2,
+                label=f'm={m}')
+    
+    # Add error value labels for each point
+    for i, err in enumerate(errors):
+        ax.annotate(f'{err:.2e}', 
+                    xy=(x_pos[i], err), 
+                    xytext=(8, 8),
+                    textcoords='offset points', 
+                    fontsize=9,
+                    fontweight='bold',
+                    color=colors[idx])
+    
+    ax.set_xlabel('Scheme', fontsize=11)
+    ax.set_ylabel('Dissipation (log scale)', fontsize=11)
+    ax.set_title(f'Wavenumber m = {m}', fontsize=12, fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(['1st Order', '2nd Order', '3rd Order', '3rd Biased'], 
+                       fontsize=10, rotation=15, ha='right')
+    ax.grid(True, alpha=0.3, which='both')
+    ax.legend(loc='upper right', fontsize=10)
+
+plt.suptitle(f'Dissipation vs Scheme (Δx={delta_x:.4f})', 
+             fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.savefig('dissipation.png', dpi=400, bbox_inches='tight')
+plt.show()
