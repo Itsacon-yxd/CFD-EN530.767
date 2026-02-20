@@ -6,7 +6,6 @@ from jax import jit
 import numpy as np
 import matplotlib.pyplot as plt
 from jax_tqdm import scan_tqdm
-from pyparsing import nums
 
 class burgers_solver(object):
     def __init__(self, delta_x, delta_y, delta_t, mu):
@@ -48,7 +47,7 @@ class burgers_solver(object):
 
         return lhs_A
     
-    def solve(self, init, bdry_cond, num_steps, penta_solver):
+    def solve(self, init, bdry_cond, num_steps, penta_solver, show_progress=True):
         # i,j=0,1,2,...,N
         Nx, Ny, C = init.shape
         assert C == 2
@@ -127,14 +126,14 @@ class burgers_solver(object):
             return jnp.stack([new_u, new_v], axis=-1), None
         
         step = jit(partial(step, lhs_A=lhs, bdry_cond=bdry_cond, penta_solver=penta_solver))
-        step = scan_tqdm(n=num_steps)(step)
+        step = scan_tqdm(n=num_steps, print_rate=1)(step) if show_progress else step
         solution = jax.lax.scan(step, init, jnp.arange(num_steps))[0]
 
         return solution
     
 def penta_solver(A, b):
     # to be done: implement ADI method for solving pentadiagonal system Ax=b
-    return jnp.linalg.solve(A, b)
+    return jax.scipy.sparse.linalg.cg(A, b, tol=1e-6)[0]
     
 def get_init(grid):
     Vt = 0.25
@@ -147,12 +146,40 @@ def get_init(grid):
     v = Vt*(x-x0) * jnp.exp( (1-(r/r0)**2) / 2 )
     return jnp.stack([u,v],axis=-1)
 
+def get_vortex(solution, delta_x, delta_y):
+    u = solution[...,0]
+    v = solution[...,1]
+
+    u_y = u.at[:,1:-1].set(
+        (u[:, 2:] - u[:, :-2]) / delta_y
+    )
+    u_y = u_y.at[:,0].set(
+        (u[:,1] - u[:,0]) / delta_y
+    )
+    u_y = u_y.at[:,-1].set(
+        (u[:,-1] - u[:,-2]) / delta_y
+    )
+    v_x = v.at[1:-1,:].set(
+        (v[2:, :] - v[:-2, :]) / delta_x
+    )
+    v_x = v_x.at[0,:].set(
+        (v[1,:] - v[0,:]) / delta_x
+    )
+    v_x = v_x.at[-1,:].set(
+        (v[-1,:] - v[-2,:]) / delta_x
+    )
+
+    return v_x-u_y
+
 if __name__ == "__main__":
+
+    plt.rcParams.update({'font.size': 14})
+
     delta_t = 1e-4
     delta_x = 2e-2
     delta_y = 2e-2
     mu = 1e-3
-    num_steps = 20000
+    num_steps = 10000
     gridx, gridy = jnp.meshgrid(jnp.arange(0,2+delta_x/2,delta_x), jnp.arange(0,1+delta_y/2,delta_y), indexing='ij')
     grid = jnp.stack([gridx, gridy], axis=-1)
 
@@ -164,17 +191,36 @@ if __name__ == "__main__":
     
     init = bdry_cond.at[1:-1,1:-1].set(get_init(grid[1:-1,1:-1]))
 
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(12,6))
-    im = axes[0].imshow(init[...,0].T, origin='lower')
+    fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(12,12))
+    im = axes[0].imshow(init[...,0].T, origin='lower', cmap='plasma')
+    axes[0].set_title("u")
     plt.colorbar(im)
-    im = axes[1].imshow(init[...,1].T, origin='lower')
+    im = axes[1].imshow(init[...,1].T, origin='lower', cmap='plasma')
+    axes[1].set_title("v")
     plt.colorbar(im)
+    plt.tight_layout()
+    plt.savefig("burgers_init.png", dpi = 600)
     plt.close()
 
     solver = burgers_solver(delta_x, delta_y, delta_t, mu)
     solution = solver.solve(init, bdry_cond, num_steps, penta_solver)
-    plt.imshow(solution[...,0].T, origin='lower', extent=(0,2,0,1), cmap='plasma')
-    plt.colorbar()
+    vortex = get_vortex(solution, delta_x, delta_y)
+    
+    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(8, 12))
+    im = axes[0].imshow(solution[...,0].T, origin='lower', extent=(0,2,0,1), cmap='plasma')
+    axes[0].set_title("u")
+    plt.colorbar(im)
+
+    im = axes[1].imshow(solution[...,1].T, origin='lower', extent=(0,2,0,1), cmap='plasma')
+    axes[1].set_title("v")
+    plt.colorbar(im)
+
+    im = axes[2].imshow(vortex.T, origin='lower', extent=(0,2,0,1), cmap='plasma')
+    axes[2].set_title(r"$\vec{\nabla}\times\vec{u}$")
+    plt.colorbar(im)
+
+    plt.tight_layout()
+    plt.savefig("burgers_solution.png", dpi = 600)
     plt.show()
 
 
