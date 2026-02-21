@@ -1,5 +1,4 @@
 from functools import partial
-from arrow import get
 import jax.numpy as jnp
 import jax
 from jax import jit
@@ -20,67 +19,13 @@ class burgers_solver(object):
         self.r_y = self.mu*self.delta_t/self.delta_y**2
         self.cfl_x = self.delta_t/self.delta_x
         self.cfl_y = self.delta_t/self.delta_y
-        
 
+        self.delta_k = 1. / (1+4*self.r_x+4*self.r_y)
 
-    def build_lhs(self, Nx, Ny):
-
-        lhs_a = 1 + 2*self.r_x+ 2*self.r_y
-        lhs_b = -self.r_x
-        lhs_c = -self.r_y
-        lhs_d = -self.r_x
-        lhs_e = -self.r_y
-
-        lhs_A = np.zeros(((Nx-1)*(Ny-1), (Ny-1)*(Nx-1)))
-        lhs_block = np.zeros((Ny-1,Ny-1))
-        np.fill_diagonal(lhs_block, lhs_a)
-        np.fill_diagonal(lhs_block[1:,:-1], lhs_c)
-        np.fill_diagonal(lhs_block[:-1,1:], lhs_e)
-
-        for i in range(Nx-1):
-            lhs_A[i*(Ny-1):(i+1)*(Ny-1), i*(Ny-1):(i+1)*(Ny-1)] = lhs_block
-
-        np.fill_diagonal(lhs_A[:-(Ny-1),Ny-1:], lhs_d)
-        np.fill_diagonal(lhs_A[Ny-1:,:-(Ny-1)], lhs_b)
-
-        lhs_A = jnp.array(lhs_A)
-
-        return lhs_A
-    
-    def solve(self, init, bdry_cond, num_steps, penta_solver, show_progress=True):
+    def solve(self, init, num_steps, show_progress=True):
         # i,j=0,1,2,...,N
-        Nx, Ny, C = init.shape
-        assert C == 2
-        Nx = Nx - 1
-        Ny = Ny - 1
-        self.reset_params()
         
-        lhs = self.build_lhs(Nx, Ny)
-        
-        r_x = self.mu * self.delta_t / self.delta_x**2
-        r_y = self.mu * self.delta_t / self.delta_y**2
-
-        g_u = bdry_cond[..., 0]   # (Ny, Nx) boundary values, interior can be 0
-        g_v = bdry_cond[..., 1]
-
-        bc_u = jnp.zeros((Nx-1, Ny-1))
-        bc_v = jnp.zeros((Nx-1, Ny-1))
-
-        # left/right boundaries (i=0 and i=-1) contribute to interior i=1 and i=N-1
-        bc_u = bc_u.at[0,  :].add(r_x * g_u[0,  1:-1])
-        bc_u = bc_u.at[-1, :].add(r_x * g_u[-1, 1:-1])
-        bc_v = bc_v.at[0,  :].add(r_x * g_v[0,  1:-1])
-        bc_v = bc_v.at[-1, :].add(r_x * g_v[-1, 1:-1])
-
-        # bottom/top boundaries (j=0 and j=-1) contribute to interior j=1 and j=N-1
-        bc_u = bc_u.at[:, 0 ].add(r_y * g_u[1:-1, 0 ])
-        bc_u = bc_u.at[:, -1].add(r_y * g_u[1:-1, -1])
-        bc_v = bc_v.at[:, 0 ].add(r_y * g_v[1:-1, 0 ])
-        bc_v = bc_v.at[:, -1].add(r_y * g_v[1:-1, -1])
-
-        bdry_cond = jnp.stack([bc_u, bc_v], axis=-1)
-        
-        def update_u(self, solution, lhs_A, bdry_cond,penta_solver): # only handles dirichlet boundary condition
+        def update_u(self, solution): # only handles dirichlet boundary condition
             u = solution[...,0]
             v = solution[...,1]
             
@@ -91,15 +36,12 @@ class burgers_solver(object):
                 u[1:-1,1:-1]*self.cfl_x/2 * u[2:,1:-1] -
                 v[1:-1,1:-1]*self.cfl_y/2 * u[1:-1,2:]
             )
-            rhs = rhs.flatten() + bdry_cond.flatten()
 
-            new_u = u.at[1:-1,1:-1].set(
-                penta_solver(lhs_A, rhs).reshape(u[1:-1,1:-1].shape)
-            )
+            new_u = self.jacobi(u, rhs)
 
             return new_u
 
-        def update_v(self, solution, lhs_A, bdry_cond, penta_solver): # only handles dirichlet boundary condition
+        def update_v(self, solution): # only handles dirichlet boundary condition
             u = solution[...,0]
             v = solution[...,1]
             
@@ -110,30 +52,60 @@ class burgers_solver(object):
                 u[1:-1,1:-1]*self.cfl_x/2 * v[2:,1:-1] -
                 v[1:-1,1:-1]*self.cfl_y/2 * v[1:-1,2:] 
                 )
-            rhs = rhs.flatten() + bdry_cond.flatten()
 
-            new_v = v.at[1:-1,1:-1].set(
-                penta_solver(lhs_A, rhs).reshape(v[1:-1,1:-1].shape)
-            )
+            new_v = self.jacobi(v, rhs)
 
             return new_v
         
 
-        def step(solution, xs, lhs_A, bdry_cond, penta_solver):
-            new_u = update_u(self, solution, lhs_A, bdry_cond[...,0], penta_solver)
-            new_v = update_v(self, solution, lhs_A, bdry_cond[...,1], penta_solver)
+        def step(solution, xs):
+            new_u = update_u(self, solution)
+            new_v = update_v(self, solution)
 
             return jnp.stack([new_u, new_v], axis=-1), None
         
-        step = jit(partial(step, lhs_A=lhs, bdry_cond=bdry_cond, penta_solver=penta_solver))
+        step = jit(step)
         step = scan_tqdm(n=num_steps, print_rate=1)(step) if show_progress else step
-        solution = jax.lax.scan(step, init, jnp.arange(num_steps))[0]
+        solution, _ = jax.lax.scan(step, init, jnp.arange(num_steps))
 
         return solution
     
-def penta_solver(A, b):
-    # to be done: implement ADI method for solving pentadiagonal system Ax=b
-    return jax.scipy.sparse.linalg.cg(A, b, tol=1e-6)[0]
+    def jacobi(self, init, rhs, tol=1e-7, max_iter=2000):
+
+        delta_k = self.delta_k
+        
+        def cond_fn(state):
+            solution, residual_norm, iteration = state
+            return (residual_norm > tol) & (iteration < max_iter)
+        
+        def body_fn(state):
+            solution, _, iteration = state
+            
+            conved = (
+                (1 + 2*self.r_x + 2*self.r_y) * solution[1:-1,1:-1] # u_i,j
+                - self.r_x * solution[:-2, 1:-1] # u_i-1,j
+                - self.r_x * solution[2:, 1:-1] # u_i+1,j
+                - self.r_y * solution[1:-1, :-2] # ui,j-1
+                - self.r_y * solution[1:-1, 2:] # u_i,j+1
+            )
+            residual = rhs - conved
+            
+            solution = solution.at[1:-1,1:-1].set(
+                solution[1:-1,1:-1] + delta_k * residual
+            )
+            
+            residual_norm = jnp.linalg.norm(residual) / residual.shape[0]
+            
+            return solution, residual_norm, iteration + 1
+        
+        # Initialize
+        init_residual = 1.0
+        init_state = (init, init_residual, 0)
+        
+        solution, final_residual, iterations = jax.lax.while_loop(cond_fn, body_fn, init_state)
+        
+        return solution
+            
     
 def get_init(grid):
     Vt = 0.25
@@ -146,27 +118,27 @@ def get_init(grid):
     v = Vt*(x-x0) * jnp.exp( (1-(r/r0)**2) / 2 )
     return jnp.stack([u,v],axis=-1)
 
-def get_vortex(solution, delta_x, delta_y):
+def get_vorticity(solution, delta_x, delta_y):
     u = solution[...,0]
     v = solution[...,1]
 
     u_y = u.at[:,1:-1].set(
-        (u[:, 2:] - u[:, :-2]) / delta_y
+        (u[:, 2:] - u[:, :-2]) / (2*delta_y)
     )
     u_y = u_y.at[:,0].set(
-        (u[:,1] - u[:,0]) / delta_y
+        (u[:,1] - u[:,0]) / (2*delta_y)
     )
     u_y = u_y.at[:,-1].set(
-        (u[:,-1] - u[:,-2]) / delta_y
+        (u[:,-1] - u[:,-2]) / (2*delta_y)
     )
     v_x = v.at[1:-1,:].set(
-        (v[2:, :] - v[:-2, :]) / delta_x
+        (v[2:, :] - v[:-2, :]) / (2*delta_x)
     )
     v_x = v_x.at[0,:].set(
-        (v[1,:] - v[0,:]) / delta_x
+        (v[1,:] - v[0,:]) / (2*delta_x)
     )
     v_x = v_x.at[-1,:].set(
-        (v[-1,:] - v[-2,:]) / delta_x
+        (v[-1,:] - v[-2,:]) / (2*delta_x)
     )
 
     return v_x-u_y
@@ -176,8 +148,8 @@ if __name__ == "__main__":
     plt.rcParams.update({'font.size': 14})
 
     delta_t = 1e-4
-    delta_x = 2e-2
-    delta_y = 2e-2
+    delta_x = 5e-3
+    delta_y = 5e-3
     mu = 1e-3
     num_steps = 10000
     gridx, gridy = jnp.meshgrid(jnp.arange(0,2+delta_x/2,delta_x), jnp.arange(0,1+delta_y/2,delta_y), indexing='ij')
@@ -189,22 +161,26 @@ if __name__ == "__main__":
     bdry_cond = bdry_cond.at[:,0,:].set(jnp.array([1.0, 0.0]))
     bdry_cond = bdry_cond.at[:,-1,:].set(jnp.array([1.0, 0.0]))
     
-    init = bdry_cond.at[1:-1,1:-1].set(get_init(grid[1:-1,1:-1]))
+    init_solution = bdry_cond.at[1:-1,1:-1].set(get_init(grid[1:-1,1:-1]))
+    init_vorticity = get_vorticity(init_solution, delta_x, delta_y)
 
-    fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(12,12))
-    im = axes[0].imshow(init[...,0].T, origin='lower', cmap='plasma')
+    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(8,12))
+    im = axes[0].imshow(init_solution[...,0].T, origin='lower', cmap='plasma')
     axes[0].set_title("u")
     plt.colorbar(im)
-    im = axes[1].imshow(init[...,1].T, origin='lower', cmap='plasma')
+    im = axes[1].imshow(init_solution[...,1].T, origin='lower', cmap='plasma')
     axes[1].set_title("v")
+    plt.colorbar(im)
+    im = axes[2].imshow(init_vorticity.T, origin='lower', cmap='plasma')
+    axes[2].set_title(r"$\vec{\nabla}\times\vec{u}$")
     plt.colorbar(im)
     plt.tight_layout()
     plt.savefig("burgers_init.png", dpi = 600)
     plt.close()
 
     solver = burgers_solver(delta_x, delta_y, delta_t, mu)
-    solution = solver.solve(init, bdry_cond, num_steps, penta_solver)
-    vortex = get_vortex(solution, delta_x, delta_y)
+    solution = solver.solve(init_solution, num_steps, show_progress=True)
+    vortex = get_vorticity(solution, delta_x, delta_y)
     
     fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(8, 12))
     im = axes[0].imshow(solution[...,0].T, origin='lower', extent=(0,2,0,1), cmap='plasma')
