@@ -2,9 +2,6 @@ from linear_burgers import linear_solver, get_exact
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 
-
-scheme_names = ["FTCS", "1st Upwind", "2nd Upwind", "QUICK"]
-color_list = ["blue", "orange", "green", "red"]
 delta_x_list = [1/20, 1/50, 1/100]
 delta_t = 1e-3
 
@@ -15,14 +12,14 @@ for delta_x, ax in zip(delta_x_list, axes.flatten()):
     solver = linear_solver(delta_t = delta_t, delta_x = delta_x)
 
     ax.plot(x_coord, get_exact(x_coord), label="Exact", color="black")
-    for scheme_num in range(4):
-        solution = solver.solve(init, num_steps=10_000_000, scheme_num=scheme_num)
-        ax.plot(x_coord, solution, label=scheme_names[scheme_num], color=color_list[scheme_num], linestyle="--")
+    solution = solver.solve(init, num_steps=10_000_000, scheme_num=1)
+    ax.plot(x_coord, solution, label='1st Upwind', color='b', linestyle="--")
+    ax.plot(x_coord, get_exact(x_coord, Pec_num = 1 / (1/50 + delta_x/2)), label=r"Exact with $\nu_{eff}$", color="magenta", linestyle=":")
     ax.set_title(r"$\Delta x = $" + f"{delta_x}")
     ax.set_xlabel("x")
     ax.set_ylabel("u(x)") if ax == axes.flatten()[0] else None
     ax.grid()
     ax.legend()
 plt.suptitle(r"Burgers' Equation Solution at $t=10000$, with $\Delta t = 10^{-3}$")
-plt.savefig("burgers_solution_comparison.png", dpi = 600)
+plt.savefig("effective_nu_comparison.png", dpi = 600)
 plt.show()

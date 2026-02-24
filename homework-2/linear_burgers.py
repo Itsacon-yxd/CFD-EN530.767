@@ -1,22 +1,16 @@
-from webbrowser import get
-
 import jax.numpy as jnp
 import numpy as np
 import jax
-from functools import partial
 from jax import jit
 import matplotlib.pyplot as plt
-from pyparsing import nums
 
-
-class solver(object):
+class linear_solver(object):
     def __init__(self, delta_x, delta_t, pec_num=50):
         self.pec_num = pec_num
         self.delta_x = delta_x
         self.delta_t = delta_t
         self.cfl = self.delta_t / self.delta_x
         self.r = self.delta_t / (self.pec_num * self.delta_x**2)
-        assert self.cfl**2 < 2*self.r, self.r < 0.5
 
     def solve(
             self,
@@ -99,16 +93,16 @@ def get_exact(x, Pec_num=50):
 if __name__ == "__main__":
 
     delta_t = 1e-3
-    delta_x = 1 / 20
+    delta_x = 1 / 50
     x_space = jnp.arange(0, 1+delta_x/2, delta_x)
     init = jnp.zeros_like(x_space).at[-1].set(1)
 
-    solver = solver(delta_t = delta_t, delta_x = delta_x)
-    solution = solver.solve(init, num_steps=10_000_000, scheme_num=2)
+    linear_solver = linear_solver(delta_t = delta_t, delta_x = delta_x)
+    solution = linear_solver.solve(init, num_steps=10_000_000, scheme_num=3)
 
     plt.plot(x_space, solution, label="Numerical")
     plt.plot(x_space, get_exact(x_space), label="Exact")
-    plt.plot(x_space, get_exact(x_space, Pec_num=1/(1/50+1/40)), label="predicted")
+    # plt.plot(x_space, get_exact(x_space, Pec_num=1/(1/50+delta_x**2/3*50-delta_x**3/4*50**2)), label="predicted")
     plt.xlabel("x")
     plt.ylabel("u(x)")
     plt.title("Burgers' Equation Solution")
@@ -116,5 +110,4 @@ if __name__ == "__main__":
     plt.legend()
     plt.savefig("burgers_solution.png", dpi = 600)
     plt.show()
-
 
