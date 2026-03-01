@@ -77,7 +77,7 @@ class burgers_solver(object):
 
         return solution
     
-    def jacobi_dirichlet(self, init, rhs, tol=1e-7, max_iter=2000):
+    def jacobi_dirichlet(self, init, rhs, tol=1e-6, max_iter=2000):
 
         delta_k = self.delta_k
         
@@ -101,7 +101,7 @@ class burgers_solver(object):
                 solution[1:-1,1:-1] + delta_k * residual
             )
             
-            residual_norm = jnp.linalg.norm(residual) / residual.shape[0]
+            residual_norm = jnp.max(jnp.abs(residual))
             
             return solution, residual_norm, iteration + 1
         
@@ -113,7 +113,7 @@ class burgers_solver(object):
         
         return solution
     
-    def jacobi_neumann(self, init, rhs, tol=1e-7, max_iter=2000):
+    def jacobi_neumann(self, init, rhs, tol=1e-6, max_iter=2000):
         
         delta_k = self.delta_k
         
@@ -138,7 +138,7 @@ class burgers_solver(object):
             )
             solution = solution.at[-1, :].set(solution[-2, :])
             
-            residual_norm = jnp.linalg.norm(residual) / residual.shape[0]
+            residual_norm = jnp.max(jnp.abs(residual))
             
             return solution, residual_norm, iteration + 1
         

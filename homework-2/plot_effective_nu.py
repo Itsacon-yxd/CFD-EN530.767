@@ -15,7 +15,7 @@ for delta_x, ax in zip(delta_x_list, axes.flatten()):
     solution = solver.solve(init, num_steps=10_000_000, scheme_num=1)
     ax.plot(x_coord, solution, label='1st Upwind', color='b', linestyle="--")
     ax.plot(x_coord, get_exact(x_coord, Pec_num = 1 / (1/50 + delta_x/2)), label=r"Exact with $\nu_{eff}$", color="magenta", linestyle=":")
-    ax.set_title(r"$\Delta x = $" + f"{delta_x}")
+    ax.set_title(r"$\Delta x = $" + f"{delta_x}"+ r' $\nu_{eff} = $' + f"{1/50 + delta_x/2:.3f}")
     ax.set_xlabel("x")
     ax.set_ylabel("u(x)") if ax == axes.flatten()[0] else None
     ax.grid()
